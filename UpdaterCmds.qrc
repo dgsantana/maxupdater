@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="updater">
+    <file alias="wait">icons/clock_alarm-512.png</file>
+    <file alias="tray">icons/icon_main.png</file>
+  </qresource>
+</RCC>
