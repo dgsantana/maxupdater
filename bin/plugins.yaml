@@ -1,0 +1,207 @@
+maxplugins:
+    env:
+        $maxroot: [reg, 'SOFTWARE\\Autodesk\\3dsMax\\$version.0', 'InstallDir']
+        $maxname: [reg, 'SOFTWARE\\Autodesk\\3dsMax\\$version.0', 'ProductName']
+        $maxrelease: [reg, 'SOFTWARE\\Autodesk\\3dsMax\\$version.0', 'Release']
+        $progfiles: [reg, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion', 'ProgramFilesDir']
+        VRAYRT30PLUGINS: [setenv, 'VRAY30_RT_FOR_3DSMAX2013_PLUGINS_x64', '$progfiles\Chaos Group\V-Ray\RT for 3ds Max 2014 for x64\bin\plugins\']
+        VRAYRT30MAIN: [setenv, 'VRAY30_RT_FOR_3DSMAX2013_MAIN_x64', '$progfiles\Chaos Group\V-Ray\RT for 3ds Max 2014 for x64\bin\']
+        VRAYOSL: [setenv, 'VRAY_OSL_PATH_3DSMAX2013_x64', '$progfiles\Chaos Group\V-Ray\3ds Max 2014 for x64\opensl\']
+    basedir: $maxroot
+    name: $maxname
+    destination: maxplugins_$version
+    tmp: ['core.dll','core.off']
+    id_file: $host_$node_$version.id
+    out:
+    - [$host_$node_$version.v, $maxrelease]
+    files:
+    - plugins/dsplugs/*.*
+    - RailcloneVRay20.dll
+    - RailcloneVRay30.dll
+    - RCEdit.dll
+    - Qt*itoo*.*
+    - plugins/railclonepro.dlo
+    - ForestVRay20.dll
+    - ForestVRay30.dll
+    - plugins/ForestPackPro.dlo
+    - cgauth.dll
+    - dte_wrapper.dll
+    - glslang.dll
+    - glvm.dll
+    - hairvrprims*.dll
+    - libmmd.dll
+    - openimageio.dll
+    - oslcomp.dll
+    - oslexec.dll
+    - oslquery.dll
+    - svml_dispmd.dll
+    - vray*.dll
+    - vraydummy*.*
+    - vrayopenimageio.dll
+    - vrayoslcomp.dll
+    - vrayoslexec.dll
+    - vrayoslquery.dll
+    - vrayspawner*.exe
+    - Qt*vray4.*
+    - python26_vray.*
+    - Python26_vray/*.*
+    - Python26_vray/DLLs/*.*
+    - Python26_vray/Lib/site-packages/*.*
+    - Python26_vray/Lib/site-packages/ASGVIS/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/Compiler/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/Loader/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/port_v2/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/port_v3/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/widget-plugins/*.*
+    - vrcompilerbackend_msl12.dll
+    - plugcfg/V-Ray/*.*
+    - plugins/vrayraw*.*
+    - plugins/vrender*.*
+    - plugins/vrayplugins/*.*
+    - plugins/vrayplugins/DTE_Components/*.*
+    - scripts/startup/vr*.*
+    - scripts/startup/railclone_utils.ms
+    - scripts/startup/forestpack.ms
+    - scripts/forestpack/*.*
+    - scripts/V-Ray/*.*
+    - plugcfg/V-Ray/*.*
+    - UI_ln/Icons/VRay*.*
+    - UI_ln/IconsDark/VRay*.*
+    - NVIDIA/shaders_3rdparty/metaSL/MSL/*.*
+    - NVIDIA/shaders_3rdparty/metaSL/XMSL/*.*
+    file-group:
+        vray: $progfiles
+        vray_destination: vray
+        vray_files:
+        - Chaos Group/V-Ray/RT for 3ds Max 2014 for x64/bin/*.*
+        - Chaos Group/V-Ray/RT for 3ds Max 2014 for x64/bin/plugins/*.*
+        - Chaos Group/V-Ray/3dsmax 2014 for x64/opensl/*.*
+    ini:
+        file: $maxroot\en-US\plugin.ini
+        section: Directories
+        values:
+        - [del, Main plug-ins]
+        - [del, dsplugs plug-ins]
+        - [del, 4Arq plug-ins]
+        - [del, dsPlugs]
+        - [del, V-Ray main plug-ins, $maxroot\plugins]
+        - [del, V-Ray additional plug-ins]
+        - [add, Main plug-ins, $maxroot\plugins]
+        - [add, V-Ray additional plug-ins, $maxroot\plugins\vrayplugins]
+        - [add, dsplugs plug-ins, $maxroot\plugins\dsPlugs]
+
+dmaxplugins:
+    env:
+        $maxroot: [reg, 'SOFTWARE\\Autodesk\\3dsMaxDesign\\$version.0', 'InstallDir']
+        $maxname: [reg, 'SOFTWARE\\Autodesk\\3dsMaxDesign\\$version.0', 'ProductName']
+        $maxrelease: [reg, 'SOFTWARE\\Autodesk\\3dsMaxDesign\\$version.0', 'Release']
+        $progfiles: [reg, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion', 'ProgramFilesDir']
+        VRAYRT30PLUGINS: [setenv, 'VRAY30_RT_FOR_3DSMAX2013_PLUGINS_x64', '$progfiles\Chaos Group\V-Ray\RT for 3ds Max 2014 for x64\bin\plugins\']
+        VRAYRT30MAIN: [setenv, 'VRAY30_RT_FOR_3DSMAX2013_MAIN_x64', '$progfiles\Chaos Group\V-Ray\RT for 3ds Max 2014 for x64\bin\']
+        VRAYOSL: [setenv, 'VRAY_OSL_PATH_3DSMAX2013_x64', '$progfiles\Chaos Group\V-Ray\3ds Max 2014 for x64\opensl\']
+    basedir: $maxroot
+    name: $maxname
+    destination: dmaxplugins_$version
+    tmp: ['3dsmax.exe','3dsmax.off']
+    id_file: $host_$node_$version.id
+    files:
+    - plugins/dsplugs/*.*
+    - RailcloneVRay20.dll
+    - RailcloneVRay30.dll
+    - RCEdit.dll
+    - Qt*itoo*.*
+    - plugins/railclonepro.dlo
+    - ForestVRay20.dll
+    - ForestVRay30.dll
+    - plugins/ForestPackPro.dlo
+    - cgauth.dll
+    - dte_wrapper.dll
+    - glslang.dll
+    - glvm.dll
+    - hairvrprims*.dll
+    - libmmd.dll
+    - openimageio.dll
+    - oslcomp.dll
+    - oslexec.dll
+    - oslquery.dll
+    - svml_dispmd.dll
+    - vray*.dll
+    - vraydummy*.*
+    - vrayopenimageio.dll
+    - vrayoslcomp.dll
+    - vrayoslexec.dll
+    - vrayoslquery.dll
+    - vrayspawner*.exe
+    - Qt*vray4.*
+    - python26_vray.*
+    - Python26_vray/*.*
+    - Python26_vray/DLLs/*.*
+    - Python26_vray/Lib/site-packages/*.*
+    - Python26_vray/Lib/site-packages/ASGVIS/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/Compiler/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/Loader/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/port_v2/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/port_v3/*.*
+    - Python26_vray/Lib/site-packages/PyQt4/uic/widget-plugins/*.*
+    - vrcompilerbackend_msl12.dll
+    - plugins/vrayraw*.*
+    - plugins/vrender*.*
+    - plugins/vrayplugins/*.*
+    - plugins/vrayplugins/DTE_Components/*.*
+    - scripts/startup/vr*.*
+    - scripts/startup/railclone_utils.ms
+    - scripts/startup/forestpack.ms
+    - scripts/forestpack/*.*
+    - scripts/V-Ray/*.*
+    - plugcfg/V-Ray/*.*
+    - UI_ln/Icons/VRay*.*
+    - UI_ln/IconsDark/VRay*.*
+    - NVIDIA/shaders_3rdparty/metaSL/MSL/*.*
+    - NVIDIA/shaders_3rdparty/metaSL/XMSL/*.*
+    file-group:
+        vray: $progfiles
+        vray_destination: vray
+        vray_files:
+        - Chaos Group/V-Ray/RT for 3ds Max 2014 for x64/bin/*.*
+        - Chaos Group/V-Ray/RT for 3ds Max 2014 for x64/bin/plugins/*.*
+        - Chaos Group/V-Ray/3dsmax 2014 for x64/opensl/*.*
+    ini:
+        file: $maxroot\en-US\plugin.ini
+        section: Directories
+        values:
+        - [del, Main plug-ins]
+        - [del, dsplugs plug-ins]
+        - [del, 4Arq plug-ins]
+        - [del, dsPlugs]
+        - [del, V-Ray main plug-ins, $maxroot\plugins]
+        - [del, V-Ray additional plug-ins]
+        - [add, Main plug-ins, $maxroot\plugins]
+        - [add, V-Ray additional plug-ins, $maxroot\plugins\vrayplugins]
+        - [add, dsplugs plug-ins, $maxroot\plugins\dsPlugs]
+
+dsscripts:
+    basedir: c:\dsScripts
+    name: dsScripts
+    destination: dsScripts
+    id_file: $host_$node.id
+    files:
+    - modeling/*.*
+    - dsMacros/*.*
+    - common/*.*
+    - dsStartup/*.*
+    - dsMacros/*.*
+    - System/*.*
+    - Outside/SoulburnScripts/*.*
+    - Outside/SoulburnScripts/images/*.*
+    - Outside/SoulburnScripts/lib/*.*
+    - Outside/SoulburnScripts/scripts/*.*
+    - Outside/outliner/*.*
+    - Outside/outliner/legacy_support/*.*
+    - Outside/outliner/ui/*.*
+    - Outside/outliner/ui/icons_dark/*.*
+    - Outside/outliner/ui/icons_light/*.*
+    - Materials/*.*
