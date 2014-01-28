@@ -156,7 +156,7 @@ class PluginUpdater(object):
             try:
                 makedirs(dirname(dst))
             except WindowsError:
-                pass
+                return -1
 
             delete_files(dst, self._logger)
             file_count += copy_files(src, dst_path, self._logger)
@@ -227,6 +227,10 @@ class PluginUpdater(object):
             if 'id_file' in node:
                 self._backup_info = node['id_file']
 
+            abort_failed = False
+            if 'abort_failed' in node:
+                abort_failed = node['abort_failed']
+
             base_dir = self.parse_env(node['basedir'])
             build_number = self.parse_env(node['destination'])
             file_count = 0
@@ -249,7 +253,10 @@ class PluginUpdater(object):
 
             if 'files' in node and not fake:
                 files = node['files']
+                # TODO: Restore files on failure
                 file_count = self.copy_files(backup_dst, base_dir, build_number, files)
+                if file_count == -1 and abort_failed:
+                    return False
 
             if 'file-group' in node and not fake:
                 file_group = node['file-group']

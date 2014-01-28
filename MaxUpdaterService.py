@@ -50,13 +50,13 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
             sys.stdout = sys.stderr = open('nul', 'w')
             win32serviceutil.ServiceFramework.__init__(self, args)
             self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
-        self._spawner = False
-        self._spwanerSvc = False
-        self._spwanerPath = None
-        self._spwanerPid = 0
+        #self._spawner = False
+        #self._spwanerSvc = False
+        #self._spwanerPath = None
+        #self._spwanerPid = 0
         self._max_names = ["3dsmax.exe", "3dsmaxdesign.exe"]
-        self._spawner_name = 'vrayspawner2013.exe'
-        self._spawner_svc_name = 'vrayspawner 2013'
+        #self._spawner_name = 'vrayspawner2013.exe'
+        #self._spawner_svc_name = 'vrayspawner 2013'
         self._installs = ['maxplugins', 'dmaxplugins']
         self._services = {}
         self._max_versions = ['16']
@@ -68,6 +68,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         self._log_level = logging.DEBUG
         self._logger = logging.getLogger('MaxUpdater')
         self._logger.setLevel(self._log_level)
+        self._service_path = os.path.dirname(__file__)
         self.updateCmdSignal.connect(self.updater_cmd)
 
         from PluginUpdater import PluginUpdater
@@ -106,14 +107,15 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                               servicemanager.PYS_SERVICE_STARTED,
                               (self._svc_name_, ''))
         self._logger.info('Starting service.')
-        server = self.start_server()
+        #server = self.start_server()
         while True:
             rc = win32event.WaitForSingleObject(self.hWaitStop, self._timeout)
             if rc == win32event.WAIT_OBJECT_0 or self._stopping:
-                servicemanager.LogInfoMsg(('%s - STOPPED' % self._svc_name_))
+                #servicemanager.LogInfoMsg(('%s - STOPPED' % self._svc_name_))
                 self._logger.info('Stopping service.')
-                ioloop.IOLoop.instance().stop()
-                server.join()
+                #ioloop.IOLoop.instance().stop()
+                #server.join()
+                sys.exit()
                 break
             self.update_max()
             time.sleep(self._timeout)
@@ -184,14 +186,14 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 if c.has_option('Service', 'logging'):
                     self._log_level = c.get('Service', 'logging')
                     self._logger.setLevel(self._log_level)
-                if c.has_option('Service', 'vrayspawner'):
-                    self._spawner_name = c.get('Service', 'vrayspawner')
+                #if c.has_option('Service', 'vrayspawner'):
+                #    self._spawner_name = c.get('Service', 'vrayspawner')
                 if c.has_option('Service', 'services'):
                     self._services = eval(c.get('Service', 'services'))
                 if c.has_option('Service', 'timer'):
                     self._timeout = c.getint('Service', 'timer')
-                if c.has_option('Service', 'vrayspawnersvc'):
-                    self._spawner_svc_name = c.get('Service', 'vrayspawnersvc')
+                #if c.has_option('Service', 'vrayspawnersvc'):
+                #    self._spawner_svc_name = c.get('Service', 'vrayspawnersvc')
                 if c.has_option('Service', 'maxprocesses'):
                     self._max_names = [i.rstrip().lstrip() for i in c.get('Service', 'maxprocesses').split(',')]
                 if c.has_option('Service', 'versions'):
@@ -199,6 +201,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 if c.has_option('Service', 'installs'):
                     self._installs = [i.strip() for i in c.get('Service', 'installs').split(',')]
                     self._updater.options_node = self._installs
+                if c.has_option('Service', 'repo'):
+                    self._updater.options.path = c.get('Service', 'repo')
             except (NoSectionError, NoOptionError):
                 pass
         self._first = False
@@ -216,13 +220,13 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
             for p in plist:
                 perc = p.get_cpu_percent()
                 self._logger.debug('3dsMax cpu usage %s' % perc)
-                if p.parent.name == "vrayspawner2013.exe" and perc < 10.0:
-                    self._logger.debug('VRay spawner found.')
-                    self._spwanerPid = p.pid
-                    self._spawner = True
-                else:
-                    self._logger.debug('Max found with parent %s.' % p.parent.name)
-                    self._spawner = False
+                found_service = False
+                for serv in self._services.itervalues():
+                    if p.parent.name == serv and perc < 10.0:
+                        self._logger.info('Service found.')
+                        found_service = True
+                if not found_service:
+                    self._logger.info('Max found with parent %s.' % p.parent.name)
                     abort = True
         except NoSuchProcess:
             self._logger.debug('Parent not found.', exc_info=True)
@@ -234,51 +238,27 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
 
         if self.can_update():
             return
-        self._logger.debug('No mission critival 3ds max running.')
+        self._logger.debug('No mission critical 3ds max running.')
 
         self._updater.load_updater_info()
         if not self._updater.check_for_valid_updates(self._max_versions):
-            self._logger.debug('Updates not required.')
+            self._logger.info('Updates not required.')
             return
 
         self.updateCmdSignal.fire('update_start')
         service_running = []
         for k in self._services.iterkeys():
-            #import psutil
             try:
                 self._logger.info('%s service stopping...' % k)
                 win32serviceutil.StopService(k)
                 service_running.append(k)
             except:
-                self._logger.error('Error stopping %s.' % k, exc_info=True)
-
-        #if self._spwanerPid != 0 and self._spawner:
-        #    import psutil
-        #
-        #    p = psutil.Process(self._spwanerPid)
-        #    if p.parent.name == "vrayspawner2013.exe" and p.get_cpu_percent() < 10.0:
-        #        try:
-        #            isServiceValid = (win32serviceutil.QueryServiceStatus('vrayspawner 2013')[1]) == 4
-        #        except:
-        #            pass
-        #        if isServiceValid:
-        #            self._logger.info('VRaySpawner service stopping...')
-        #            win32serviceutil.StopService('vrayspawner 2013')
-        #            self._spwanerSvc = True
-        #        else:
-        #            self._logger.info('VRaySpawner killed...')
-        #            self._spwanerPath = p.parent.cmdline
-        #            self._spwanerSvc = False
-        #            p.parent.kill()
-        #            p.kill()
+                self._logger.debug('Error stopping %s.' % k, exc_info=True)
 
         try:
             self._logger.info('Updating...')
             self._updater.process_versions(self._max_versions)
         except:
-            #exc_type, exc_value, exc_traceback = sys.exc_info()
-            #lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-            #servicemanager.LogInfoMsg('Error Updating:\n'.join('!!' + line for line in lines))
             self._logger.error('Error updating.', exc_info=True)
             self._timeout = 60 * 3
 
@@ -288,21 +268,6 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 win32serviceutil.StartService(k)
             except:
                 self._logger.error('Error starting %s.' % k, exc_info=True)
-
-        #if self._spawner:
-        #    import os
-        #
-        #    try:
-        #        if self._spawner:
-        #            if isServiceValid and self._spwanerSvc:
-        #                win32serviceutil.StartService('vrayspawner 2013')
-        #                self._logger.info('VRaySpawner service starting...')
-        #                self._spawner = True
-        #            else:
-        #                self._logger.info('VRaySpawner starting...')
-        #                os.system(self._spwanerPath)
-        #    except:
-        #        self._logger.error('Error starting %s.' % self._spwanerPath, exc_info=True)
 
         self._logger.info('Update done.')
         self.updateCmdSignal.fire('update_end')
