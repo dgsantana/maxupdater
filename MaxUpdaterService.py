@@ -100,25 +100,37 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
 
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        self.stop()
         win32event.SetEvent(self.hWaitStop)
+        self.ReportServiceStatus(win32service.SERVICE_STOPPED)
 
     def SvcDoRun(self):
-        servicemanager.LogMsg(servicemanager.EVENTLOG_INFORMATION_TYPE,
-                              servicemanager.PYS_SERVICE_STARTED,
-                              (self._svc_name_, ''))
+        #servicemanager.LogMsg(servicemanager.EVENTLOG_INFORMATION_TYPE,
+        #                      servicemanager.PYS_SERVICE_STARTED,
+        #                      (self._svc_name_, ''))
+        self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
+        try:
+            self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+            self.start()
+            win32event.WaitForSingleObject(self.hWaitStop, win32event.INFINITE)
+        except Exception:
+            self._logger.error('Exeption', exc_info=True)
+            self.SvcStop()
+
+    def start(self):
         self._logger.info('Starting service.')
-        #server = self.start_server()
+        server = self.start_server()
         while True:
-            rc = win32event.WaitForSingleObject(self.hWaitStop, self._timeout)
-            if rc == win32event.WAIT_OBJECT_0 or self._stopping:
-                #servicemanager.LogInfoMsg(('%s - STOPPED' % self._svc_name_))
+            if self._stopping:
                 self._logger.info('Stopping service.')
-                #ioloop.IOLoop.instance().stop()
-                #server.join()
-                sys.exit()
+                ioloop.IOLoop.instance().stop()
+                server.join()
                 break
             self.update_max()
             time.sleep(self._timeout)
+
+    def stop(self):
+        self._stopping = True
 
     def start_server(self):
         t = threading.Thread(target=self.threaded_loop)
