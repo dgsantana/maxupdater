@@ -17,8 +17,8 @@ import threading
 from zmq.eventloop import ioloop, zmqstream
 
 __author__ = 'Daniel Santana'
-__date__ = '20/09/2013'
-__version__ = '1.2.5'
+__date__ = '30/01/2014'
+__version__ = '1.5.0'
 __status__ = 'Production'
 
 
@@ -50,13 +50,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
             sys.stdout = sys.stderr = open('nul', 'w')
             win32serviceutil.ServiceFramework.__init__(self, args)
             self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
-        #self._spawner = False
-        #self._spwanerSvc = False
-        #self._spwanerPath = None
-        #self._spwanerPid = 0
         self._max_names = ["3dsmax.exe", "3dsmaxdesign.exe"]
-        #self._spawner_name = 'vrayspawner2013.exe'
-        #self._spawner_svc_name = 'vrayspawner 2013'
         self._installs = ['maxplugins', 'dmaxplugins']
         self._services = {}
         self._max_versions = ['16']
@@ -68,7 +62,10 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         self._log_level = logging.DEBUG
         self._logger = logging.getLogger('MaxUpdater')
         self._logger.setLevel(self._log_level)
-        self._service_path = os.path.dirname(__file__)
+        self._service_path = os.path.dirname(__file__) if not hasattr(sys, 'frozen') else os.path.dirname(unicode(sys.executable, sys.getfilesystemencoding()))
+        self._options_files = {}
+        self._default_path = os.path.join(self._service_path, 'updater.ini')
+        self._options_files[self._default_path] = 0
         self.updateCmdSignal.connect(self.updater_cmd)
 
         from PluginUpdater import PluginUpdater
@@ -83,7 +80,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
             self._logger.addHandler(ev_net)
         else:
             logging.basicConfig()
-        rl = RotatingFileHandler('c:/Tools/Updater/debug.log', delay=True, maxBytes=150000, backupCount=5)
+        rl = RotatingFileHandler(os.path.join(self._service_path, 'debug.log'), delay=True, maxBytes=150000, backupCount=5)
         rl.setFormatter(logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s'))
         self._logger.addHandler(rl)
 
@@ -91,7 +88,6 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         self.read_settings()
         self._timeout = 3000
         self._exit_server = False
-        #self._threadLock = threading.Lock()
         self._context = zmq.Context()
         self._socket = self._context.socket(zmq.ROUTER)
         self._socket.bind('tcp://127.0.0.1:5570')
@@ -105,9 +101,6 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         self.ReportServiceStatus(win32service.SERVICE_STOPPED)
 
     def SvcDoRun(self):
-        #servicemanager.LogMsg(servicemanager.EVENTLOG_INFORMATION_TYPE,
-        #                      servicemanager.PYS_SERVICE_STARTED,
-        #                      (self._svc_name_, ''))
         self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
         try:
             self.ReportServiceStatus(win32service.SERVICE_RUNNING)
@@ -136,8 +129,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         t = threading.Thread(target=self.threaded_loop)
         t.daemon = True
         t.start()
-        #context = zmq.Context.instance()
-        #self._worker = context.socket(zmq.DEALER)
+        context = zmq.Context.instance()
+        self._worker = context.socket(zmq.DEALER)
         return t
 
     @staticmethod
@@ -180,43 +173,53 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 server.join()
                 break
 
+    def _parse_options(self, option_file, global_options=False):
+        if not os.path.exists(option_file):
+            return
+        m = os.path.getmtime(option_file)
+        if not self._options_files.has_key(option_file) or self._options_files[option_file] != m:
+            self._options_files[option_file] = m
+        else:
+            return
+        if global_options:
+            self._logger.info('Loading global ini %s' % option_file)
+        else:
+            self._logger.info('Loading ini %s' % option_file)
+        config = SafeConfigParser()
+        config.read(option_file)
+        try:
+            if config.has_option('Global', 'options') and not global_options:
+                p = config.get('Global', 'options')
+                self._parse_options(p, global_options=True)
+            if config.has_option('Service', 'logging'):
+                self._log_level = config.get('Service', 'logging')
+                self._logger.setLevel(self._log_level)
+            if config.has_option('Service', 'services'):
+                self._services = eval(config.get('Service', 'services'))
+            if config.has_option('Service', 'timer'):
+                self._timeout = config.getint('Service', 'timer')
+            if config.has_option('Service', 'maxprocesses'):
+                self._max_names = [i.rstrip().lstrip() for i in config.get('Service', 'maxprocesses').split(',')]
+            if config.has_option('Service', 'versions'):
+                self._max_versions = [i.strip() for i in config.get('Service', 'versions').split(',')]
+            if config.has_option('Service', 'installs'):
+                self._installs = [i.strip() for i in config.get('Service', 'installs').split(',')]
+                self._updater.options_node = self._installs
+            if config.has_option('Service', 'repo'):
+                self._updater._options.path = config.get('Service', 'repo')
+                #self._logger.info('Plugin repo %s' % self._updater._options.path)
+        except (NoSectionError, NoOptionError):
+            pass
+
     def read_settings(self):
         """
         Read service settings
         """
-        p = r'\\4arq-server00\netinstall\max_plugs\updater.ini'
-        if os.path.exists(p):
-            m = os.path.getmtime(p)
-            if self._notify != m:
-                self._notify = m
-            else:
-                return
-            self._logger.info('Loading ini')
-            c = SafeConfigParser()
-            c.read(p)
+        for key in self._options_files.iterkeys():
             try:
-                if c.has_option('Service', 'logging'):
-                    self._log_level = c.get('Service', 'logging')
-                    self._logger.setLevel(self._log_level)
-                #if c.has_option('Service', 'vrayspawner'):
-                #    self._spawner_name = c.get('Service', 'vrayspawner')
-                if c.has_option('Service', 'services'):
-                    self._services = eval(c.get('Service', 'services'))
-                if c.has_option('Service', 'timer'):
-                    self._timeout = c.getint('Service', 'timer')
-                #if c.has_option('Service', 'vrayspawnersvc'):
-                #    self._spawner_svc_name = c.get('Service', 'vrayspawnersvc')
-                if c.has_option('Service', 'maxprocesses'):
-                    self._max_names = [i.rstrip().lstrip() for i in c.get('Service', 'maxprocesses').split(',')]
-                if c.has_option('Service', 'versions'):
-                    self._max_versions = [i.strip() for i in c.get('Service', 'versions').split(',')]
-                if c.has_option('Service', 'installs'):
-                    self._installs = [i.strip() for i in c.get('Service', 'installs').split(',')]
-                    self._updater.options_node = self._installs
-                if c.has_option('Service', 'repo'):
-                    self._updater.options.path = c.get('Service', 'repo')
-            except (NoSectionError, NoOptionError):
-                pass
+                self._parse_options(key)
+            except:
+                self._logger.error('Error parsing %s.' % key, exc_info=True)
         self._first = False
 
     def can_update(self):
@@ -254,7 +257,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
 
         self._updater.load_updater_info()
         if not self._updater.check_for_valid_updates(self._max_versions):
-            self._logger.debug('Updates not required.')
+            self._logger.info('Updates not required.')
             return
 
         self.updateCmdSignal.fire('update_start')
