@@ -119,7 +119,10 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 ioloop.IOLoop.instance().stop()
                 server.join()
                 break
-            self.update_max()
+            try:
+                self.update_max()
+            except:
+                self._logger.debug('Error.', exc_info=True)
             time.sleep(self._timeout)
 
     def stop(self):
@@ -177,6 +180,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         if not os.path.exists(option_file):
             return
         m = os.path.getmtime(option_file)
+        self._logger.debug('File %s modified %s' % (option_file, m))
         if not self._options_files.has_key(option_file) or self._options_files[option_file] != m:
             self._options_files[option_file] = m
         else:
@@ -215,7 +219,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         """
         Read service settings
         """
-        for key in self._options_files.iterkeys():
+        files = self._options_files.keys()
+        for key in files:
             try:
                 self._parse_options(key)
             except:
@@ -246,6 +251,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         except NoSuchProcess:
             self._logger.debug('Parent not found.', exc_info=True)
             abort = True
+        except Exception:
+            self._logger.debug('Error.', exc_info=True)
         return abort
 
     def update_max(self):
