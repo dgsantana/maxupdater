@@ -120,6 +120,20 @@ class PluginUpdater(object):
             result = None
         return result
 
+    def _set_reg(self, hkey, query, value):
+        """
+        Set info from Registry
+        @param hkey: HKey
+        @param query: Local key
+        @param: value: Value of the Key
+        """
+        try:
+            with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, hkey) as key:
+                result = _winreg.SetValueEx(key, query, 0, _winreg.REG_SZ, value)
+        except:
+            result = None
+        return result
+
     def parse_env(self, s):
         for k, v in self._env.iteritems():
             if v is not None:
@@ -256,6 +270,7 @@ class PluginUpdater(object):
                 # TODO: Restore files on failure
                 file_count = self.copy_files(backup_dst, base_dir, build_number, files)
                 if file_count == -1 and abort_failed:
+                    self._logger.error('File copy failed. Aborting update.')
                     return False
 
             if 'file-group' in node and not fake:

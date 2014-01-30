@@ -235,10 +235,10 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 found_service = False
                 for serv in self._services.itervalues():
                     if p.parent.name == serv and perc < 10.0:
-                        self._logger.info('Service found.')
+                        self._logger.debug('Service found.')
                         found_service = True
                 if not found_service:
-                    self._logger.info('Max found with parent %s.' % p.parent.name)
+                    self._logger.debug('Max found with parent %s.' % p.parent.name)
                     abort = True
         except NoSuchProcess:
             self._logger.debug('Parent not found.', exc_info=True)
@@ -254,7 +254,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
 
         self._updater.load_updater_info()
         if not self._updater.check_for_valid_updates(self._max_versions):
-            self._logger.info('Updates not required.')
+            self._logger.debug('Updates not required.')
             return
 
         self.updateCmdSignal.fire('update_start')
