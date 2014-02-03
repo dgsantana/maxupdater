@@ -32,7 +32,8 @@ def delete_files(src_glob, logger):
 
 
 def GetHashofDirs(directory, verbose=0, ignore=[]):
-    import hashlib, os
+    import hashlib
+    import os
 
     SHAhash = hashlib.sha1()
     if not os.path.exists(directory):

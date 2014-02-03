@@ -12,6 +12,7 @@ from ConfigParser import NoOptionError, NoSectionError, ConfigParser
 import yaml
 
 from dsutils import copy_files, delete_files, GetHashofDirs
+from sys import exc_info
 #from examples.smbcat import file
 
 try:
@@ -89,6 +90,12 @@ class PluginUpdater(object):
                 key = _winreg.OpenKey(reg, path, 0, _winreg.KEY_ALL_ACCESS)
                 _winreg.SetValueEx(key, name, 0, _winreg.REG_EXPAND_SZ, value)
                 self._logger.info('Setting env: %s=%s' % (name, value))
+            elif v[0] == 'setreg':
+                path = self.parse_env(v[1])
+                name = self.parse_env(v[2])
+                value = self.parse_env(v[3])
+                self._set_reg(path, name, value)
+                self._logger.info('Setting Registry: %s[%s]=%s' % (path, name, value))
 
     def update_env(self, d):
         """
@@ -169,8 +176,11 @@ class PluginUpdater(object):
                 dst_path = dirname(dst)
             try:
                 makedirs(dirname(dst))
-            except WindowsError:
-                return -1
+            except WindowsError as e:
+                e.
+                pass
+                ## self._logger.error('', exc_info=True)
+                ## return -1
 
             delete_files(dst, self._logger)
             file_count += copy_files(src, dst_path, self._logger)
@@ -250,6 +260,7 @@ class PluginUpdater(object):
             file_count = 0
             self._logger.info("Processing '{0}' in {1} mode.".format(self.parse_env(node['name']), mode))
             self._logger.debug("Root '{0}'".format(base_dir))
+            self._logger.debug("Destination '{0}'".format(build_number))
             if not self.requires_update(backup_dst, build_number) and mode != 'backup':
                 self._logger.debug('No update required.')
                 continue
@@ -366,7 +377,7 @@ class PluginUpdater(object):
 
 
 if __name__ == '__main__':
-    print("Plugin Installer/Backup v1.0")
+    print("Plugin Installer/Backup v1.5")
     plug = PluginUpdater()
     plug._logger.addHandler(logging.StreamHandler())
     plug._logger.setLevel(logging.DEBUG)

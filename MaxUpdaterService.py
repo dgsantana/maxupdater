@@ -89,8 +89,11 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         self._timeout = 3000
         self._exit_server = False
         self._context = zmq.Context()
-        self._socket = self._context.socket(zmq.ROUTER)
-        self._socket.bind('tcp://127.0.0.1:5570')
+        self._socket = self._context.socket(zmq.REP)
+        import socket
+        h = socket.gethostname().lower()
+        self._socket.setsockopt(zmq.IDENTITY, h)
+        self._socket.bind('tcp://*:5570')
         self._server_stream = zmqstream.ZMQStream(self._socket)
         self._server_stream.on_recv(self._process_server)
 
@@ -132,8 +135,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         t = threading.Thread(target=self.threaded_loop)
         t.daemon = True
         t.start()
-        context = zmq.Context.instance()
-        self._worker = context.socket(zmq.DEALER)
+        #context = zmq.Context.instance()
+        #self._worker = context.socket(zmq.DEALER)
         return t
 
     @staticmethod
@@ -142,13 +145,14 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         ioloop.IOLoop.instance().start()
 
     def _process_server(self, msg):
-        print(msg)
-        if 'update -force' in msg:
+        #print(msg)
+        import socket
+        h = socket.gethostname().lower()
+        if 'update' in msg:
+            self._server_stream.send('Updating %s' % h)
             self.update_max()
         elif 'ping' in msg:
-            import socket
-            h = socket.gethostname().lower()
-            self._server_stream.send('info', zmq.SNDMORE)
+            #self._server_stream.send('info', zmq.SNDMORE)
             self._server_stream.send('%s is alive' % h)
             self._logger.info('Ping response sent.')
         elif 'quit' in msg:
