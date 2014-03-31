@@ -1,19 +1,24 @@
-#!/usr/bin/python2.7
-from collections import OrderedDict
+from ConfigParser import NoSectionError, NoOptionError, SafeConfigParser, ConfigParser
 import os
-import sys
-from os import makedirs
 from os.path import join, dirname
-from optparse import OptionParser
 import _winreg
-import logging
-from ConfigParser import NoOptionError, NoSectionError, ConfigParser
 
+from psutil import NoSuchProcess
+import time
+import psutil
+import sys
+import win32serviceutil
 import yaml
 
-from dsutils import copy_files, delete_files, GetHashofDirs
-from sys import exc_info
-#from examples.smbcat import file
+from dsutils import GetHashofDirs, delete_files, copy_files
+
+
+__author__ = 'dgsantana'
+__version__ = '2.0a'
+__date__ = '31/03/2014'
+
+import threading
+import logging
 
 try:
     from clint.textui import progress
@@ -26,50 +31,36 @@ else:
     DONT_USE_PROGRESS = True
 
 
-def foo_callback(option, opt, value, parser):
-    setattr(parser.values, option.dest, value.split(','))
-
-
-class PluginUpdater(object):
-    """description of class"""
-
-    def __init__(self, args=None):
-        parser = OptionParser()
-        parser.add_option('-m', '--mode', dest="mode", default="backup", choices=['install', 'backup'],
-                          help='interaction mode: install, backup')
-        parser.add_option('-i', '--install', dest="mode", action="store_const", const="install",
-                          help='install mode')
-        parser.add_option('-v', '--maxversion', dest="max_version", default="0",
-                          help='3ds max version number')
-        parser.add_option('-s', '--sourcemaxversion', dest="source_version", default=None,
-                          help='source 3ds max version number')
-        parser.add_option('-d', '--debug', dest="verbose", action="store_true",
-                          help='verbose mode')
-        parser.add_option('-q', '--quiet', dest="verbose", action="store_false",
-                          help='quiet mode')
-        parser.add_option('-p', '--path', dest="path", default="\\\\4arq-server00\\NetInstall\\max_plugs\\",
-                          help='backup path')
-        parser.add_option('-n', '--node', dest="node", action='callback', callback=foo_callback,
-                          default=['maxplugins', 'dmaxplugins'],
-                          help='node do backup/install')
-        parser.add_option('-a', '--all', dest="allnodes", default=False,
-                          help='copy all nodes')
-        if args is None:
-            args = sys.argv[1:]
-        (options, args) = parser.parse_args(args)
-        self._options = options
-        self._yaml = {}
-        import socket
-
-        self._env = {'$version': self._options.max_version, '$host': socket.gethostname().lower()}
-        self._backup_info = '$host_$node.id'
-        self._dirtyFile = True
+class UpdateThread(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self._monitor_processes = True
+        self._options_files = {}
+        self._service_path = os.path.dirname(__file__) if not hasattr(sys, 'frozen') else os.path.dirname(unicode(sys.executable, sys.getfilesystemencoding()))
+        self._default_path = os.path.join(self._service_path, 'updater.ini')
+        self._options_files[self._default_path] = 0
+        self._first = True
         self._notify = None
-        self.options_node = self._options.node
+        self._options = {'timeout': 900, 'all_nodes': True, 'mode': 'install'}
+        self._plugin_list = {}
+        self._env = {}
+        self._stop = threading.Event()
         self._logger = logging.getLogger('MaxUpdater')
+        self._logger.info('Updater Thread {0} [{1}]'.format(__version__, __date__))
 
-    def load_updater_info(self):
-        f = join(self._options.path, 'plugins.yaml')
+    def run(self):
+        while not self._stop.isSet():
+            self._update_max()
+            time.sleep(self._options['timeout'])
+
+    def stop(self):
+        self._stop.set()
+
+    def stopped(self):
+        return self._stop.isSet()
+
+    def _load_updater_info(self):
+        f = join(self._options['repo'], 'plugins.yaml')
         if os.path.exists(f):
             m = os.path.getmtime(f)
             if self._notify != m:
@@ -77,27 +68,145 @@ class PluginUpdater(object):
             else:
                 return
             self._logger.info('Loading updater info.')
-            self._yaml = yaml.load(open(f))
-            self._dirtyFile = False
+            self._plugin_list = yaml.load(open(f))
+
+    def _parse_options(self, option_file, global_options=False):
+        if not os.path.exists(option_file):
+            return
+        m = os.path.getmtime(option_file)
+        self._logger.debug('File %s modified %s' % (option_file, m))
+        if not self._options_files.has_key(option_file) or self._options_files[option_file] != m:
+            self._options_files[option_file] = m
+        else:
+            return
+        if global_options:
+            self._logger.info('Loading global ini %s' % option_file)
+        else:
+            self._logger.info('Loading ini %s' % option_file)
+        config = SafeConfigParser()
+        config.read(option_file)
+        try:
+            if config.has_option('Global', 'options') and not global_options:
+                p = config.get('Global', 'options')
+                self._parse_options(p, global_options=True)
+            if config.has_option('Global', 'mode') and not global_options:
+                self._options['mode'] = config.get('Global', 'mode')
+            if config.has_option('Service', 'logging'):
+                self._options['logging'] = config.get('Service', 'logging')
+                self._logger.setLevel(self._options['logging'])
+            if config.has_option('Service', 'services'):
+                self._options['services'] = eval(config.get('Service', 'services'))
+            if config.has_option('Service', 'timer'):
+                self._options['timeout'] = config.getint('Service', 'timer')
+            if config.has_option('Service', 'processes'):
+                self._options['processes'] = [i.rstrip().lstrip() for i in config.get('Service', 'processes').split(',')]
+            if config.has_option('Service', 'versions'):
+                self._options['versions'] = [i.strip() for i in config.get('Service', 'versions').split(',')]
+            if config.has_option('Service', 'installs'):
+                self._options['installs'] = [i.strip() for i in config.get('Service', 'installs').split(',')]
+            if config.has_option('Service', 'repo'):
+                self._options['repo'] = config.get('Service', 'repo')
+        except (NoSectionError, NoOptionError):
+            pass
+
+    def _read_settings(self):
+        """
+        Read service settings
+        """
+        files = self._options_files.keys()
+        for key in files:
+            try:
+                self._parse_options(key)
+            except:
+                self._logger.error('Error parsing %s.' % key, exc_info=True)
+        self._first = False
+
+    def _can_update(self):
+        abort = False
+        try:
+            plist = filter(lambda x: x.name in self._options['processes'],
+                           [psutil.Process(i) for i in psutil.get_pid_list()])
+            if not len(plist):
+                return False
+
+            for p in plist:
+                per = p.get_cpu_percent()
+                self._logger.debug('3dsMax cpu usage %s' % per)
+                found_service = False
+                for service_name in self._options['services'].itervalues():
+                    if p.parent.name == service_name and per < 10.0:
+                        self._logger.debug('Service found.')
+                        found_service = True
+                if not found_service:
+                    self._logger.debug('%s parent %s.' % (p.name, p.parent.name))
+                    abort = True
+        except NoSuchProcess:
+            self._logger.debug('Parent not found.', exc_info=True)
+            abort = True
+        except Exception:
+            self._logger.debug('Error.', exc_info=True)
+        return abort
+
+    def _update_max(self):
+        self._read_settings()
+
+        if self._can_update():
+            return
+        self._logger.debug('No mission critical 3ds max running.')
+
+        self._load_updater_info()
+        if not self._check_for_valid_updates(self._options['versions']):
+            self._logger.info('Updates not required.')
+            return
+
+        service_running = []
+        for k in self._options['services'].iterkeys():
+            try:
+                self._logger.info('%s service stopping...' % k)
+                win32serviceutil.StopService(k)
+                service_running.append(k)
+            except:
+                self._logger.debug('Error stopping %s.' % k, exc_info=True)
+
+        # don't let any of the processes run
+        killer = threading.Thread(target=self._process_killer())
+        self._monitor_processes = True
+        killer.start()
+        try:
+            self._logger.info('Updating...')
+            self._process_versions(self._options['versions'])
+        except:
+            self._logger.error('Error updating.', exc_info=True)
+            self._options['timeout'] = 60 * 3
+
+        self._monitor_processes = False
+        killer.join()
+        for k in service_running:
+            try:
+                self._logger.info('%s service starting...' % k)
+                win32serviceutil.StartService(k)
+            except:
+                self._logger.error('Error starting %s.' % k, exc_info=True)
+        self._logger.info('Update done.')
 
     def _set_env(self, env_key):
         for k, v in env_key.iteritems():
             if v[0] == 'setenv':
-                name = self.parse_env(v[1])
-                value = self.parse_env(v[2])
+                name = self._parse_env(v[1])
+                value = self._parse_env(v[2])
                 path = r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
                 reg = _winreg.ConnectRegistry(None, _winreg.HKEY_LOCAL_MACHINE)
                 key = _winreg.OpenKey(reg, path, 0, _winreg.KEY_ALL_ACCESS)
                 _winreg.SetValueEx(key, name, 0, _winreg.REG_EXPAND_SZ, value)
                 self._logger.info('Setting env: %s=%s' % (name, value))
             elif v[0] == 'setreg':
-                path = self.parse_env(v[1])
-                name = self.parse_env(v[2])
-                value = self.parse_env(v[3])
+                path = self._parse_env(v[1])
+                name = self._parse_env(v[2])
+                value = self._parse_env(v[3])
                 self._set_reg(path, name, value)
                 self._logger.info('Setting Registry: %s[%s]=%s' % (path, name, value))
 
-    def update_env(self, d):
+    def _update_env(self, d):
         """
         @type d: dict
         @param d:
@@ -106,14 +215,15 @@ class PluginUpdater(object):
         result = True
         for k, v in d.iteritems():
             if v[0] == 'reg':
-                self._env[k] = self.get_reg(self.parse_env(v[1]), self.parse_env(v[2]))
+                self._env[k] = self._get_reg(self._parse_env(v[1]), self._parse_env(v[2]))
                 if self._env[k] is None:
                     result = False
                 else:
                     self._logger.debug("Adding env['%s'] = '%s'" % (k, self._env[k]))
         return result
 
-    def get_reg(self, hkey, query):
+    @staticmethod
+    def _get_reg(hkey, query):
         """
         Get info from Registry
         @param hkey: HKey
@@ -127,7 +237,8 @@ class PluginUpdater(object):
             result = None
         return result
 
-    def _set_reg(self, hkey, query, value):
+    @staticmethod
+    def _set_reg(hkey, query, value):
         """
         Set info from Registry
         @param hkey: HKey
@@ -141,7 +252,7 @@ class PluginUpdater(object):
             result = None
         return result
 
-    def parse_env(self, s):
+    def _parse_env(self, s):
         for k, v in self._env.iteritems():
             if v is not None:
                 s = s.replace(k, v)
@@ -175,7 +286,7 @@ class PluginUpdater(object):
                 dst = join(base_dir, s)
                 dst_path = dirname(dst)
             try:
-                makedirs(dirname(dst))
+                os.makedirs(dirname(dst))
             except WindowsError as e:
                 pass
                 ## self._logger.error('', exc_info=True)
@@ -225,82 +336,92 @@ class PluginUpdater(object):
                 for thefile in files:
                     dstzip.write(os.path.join(root, thefile))
 
-    def requires_update(self, backup_dst, build_number):
+    def _requires_update(self, backup_dst, build_number):
         #import socket
         try:
             c = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
-            #n1 = '%(host)s_%(node)s.id' % {'host': self._env['$host'], 'node': build_number}
-            m = open(join(backup_dst, self.parse_env(self._backup_info))).read().rstrip('\n')
+            m = open(join(backup_dst, self._parse_env(self._backup_info))).read().rstrip('\n')
             return c != m
         except:
             pass
         return True
 
-    def check_for_valid_updates(self, versions=None):
-        backup_dst = self._options.path
+    def _check_for_valid_updates(self, versions=None):
+        backup_dst = self._options['repo']
         valid = False
         if versions is None:
             versions = [self._env['$version']]
 
         for v in versions:
             self._env['$version'] = v
-            for o in self._yaml:
-                if not o in self.options_node and not self._options.allnodes:
+            for o in self._plugin_list:
+                if not o in self._options['installs'] and not self._options['all_nodes']:
                     continue
 
                 self._env['$node'] = o
-                self._env['$backup'] = self._options.path
+                self._env['$backup'] = self._options['repo']
 
-                if 'env' in self._yaml[o]:
-                    if not self.update_env(self._yaml[o]['env']):
+                if 'env' in self._plugin_list[o]:
+                    if not self._update_env(self._plugin_list[o]['env']):
                         continue
 
-                if 'id_file' in self._yaml[o]:
-                    self._backup_info = self._yaml[o]['id_file']
-                build_number = self.parse_env(self._yaml[o]['destination'])
-                if self.requires_update(backup_dst, build_number):
+                if 'id_file' in self._plugin_list[o]:
+                    self._backup_info = self._plugin_list[o]['id_file']
+                build_number = self._parse_env(self._plugin_list[o]['destination'])
+                if self._requires_update(backup_dst, build_number):
                     valid = True
 
         return valid
 
-    def process_versions(self, versions):
+    def _process_versions(self, versions):
         for v in versions:
             self._env['$version'] = v
-            self.process()
+            self._process()
 
-    def process(self, fake=False):
-        if self._yaml is None:
+    def _process_killer(self):
+        while self._monitor_processes:
+            try:
+                plist = filter(lambda x: x.name in self._options['processes'],
+                               [psutil.Process(i) for i in psutil.get_pid_list()])
+                for p in plist:
+                    p.kill()
+            except:
+                self._logger.debug('Error.', exc_info=True)
+            time.sleep(.5)
+
+    def _process(self, fake=False):
+        if self._plugin_list is None:
             return
-        mode = self._options.mode
-        backup_dst = self._options.path
+        mode = self._options['mode']
+        backup_dst = self._options['repo']
 
-        for o in self._yaml:
-            if not o in self.options_node and not self._options.allnodes:
+        for o in self._plugin_list:
+            if not o in self._options['installs'] and not self._options['all_nodes']:
                 continue
 
             self._env['$node'] = o
 
-            node = self._yaml[o]
+            node = self._plugin_list[o]
             node_env = None
             if 'env' in node:
                 node_env = node['env']
-                if not self.update_env(node_env):
+                if not self._update_env(node_env):
                     continue
 
             if 'id_file' in node:
-                self._backup_info = node['id_file']
+                self._options['backup_info'] = node['id_file']
 
             abort_failed = False
             if 'abort_failed' in node:
                 abort_failed = node['abort_failed']
 
-            base_dir = self.parse_env(node['basedir'])
-            build_number = self.parse_env(node['destination'])
+            base_dir = self._parse_env(node['basedir'])
+            build_number = self._parse_env(node['destination'])
             file_count = 0
-            self._logger.info("Processing '{0}' in {1} mode.".format(self.parse_env(node['name']), mode))
+            self._logger.info("Processing '{0}' in {1} mode.".format(self._parse_env(node['name']), mode))
             self._logger.debug("Root '{0}'".format(base_dir))
             self._logger.debug("Destination '{0}'".format(backup_dst))
-            if not self.requires_update(backup_dst, build_number) and mode != 'backup':
+            if not self._requires_update(backup_dst, build_number) and mode != 'backup':
                 self._logger.debug('No update required.')
                 continue
 
@@ -323,19 +444,18 @@ class PluginUpdater(object):
                 if file_count == -1 and abort_failed:
                     self._logger.error('File copy failed. Aborting update.')
                     return False
-
-            if 'file-group' in node and not fake:
+            elif 'file-group' in node and not fake:
                 file_group = node['file-group']
                 for k, v in file_group.iteritems():
                     if not isinstance(v, list):
-                        temp_basedir = self.parse_env(v)
+                        temp_basedir = self._parse_env(v)
                         group_destination = '%s_destination' % k
                         group_files = '%s_files' % k
                         group_dirs = '%s_dirs' % k
                         temp_destination = backup_dst
 
                         if group_destination in file_group:
-                            temp_destination = join(self._options.path, self.parse_env(file_group[group_destination]))
+                            temp_destination = join(self._options['repo'], self._parse_env(file_group[group_destination]))
 
                         if group_files in file_group and isinstance(file_group[group_files], list):
                             self._logger.info('Processing file group %s' % k)
@@ -350,16 +470,16 @@ class PluginUpdater(object):
                                 d1 = os.path.dirname(os.path.join(temp_destination, d))
                                 self._logger.info('Copying directory %s to %s' % (b1, d1))
                                 self.copy_tree(b1, d1)
-
-            if 'ini' in node and not fake:
+            elif 'ini' in node and not fake:
                 ini = node['ini']
-                section = self.parse_env(ini['section'])
+                section = self._parse_env(ini['section'])
                 c = ConfigParser()
                 c.optionxform = str
+                root = None
                 if mode == 'backup':
                     root = self._env['$maxroot']
                     self._env['$maxroot'] = join(backup_dst, build_number)
-                c.read(self.parse_env(ini['file']))
+                c.read(self._parse_env(ini['file']))
                 dirty = False
                 if DONT_USE_PROGRESS:
                     it = ini['values']
@@ -377,7 +497,7 @@ class PluginUpdater(object):
                                 c.add_section(section)
                         if mode == 'install':
                             self._logger.info('Adding %s to ini section %s with value %s' % (key, section, v))
-                            c.set(section, key, self.parse_env(v))
+                            c.set(section, key, self._parse_env(v))
                         else:
                             c.set(section, key, v)
                         dirty = True
@@ -387,30 +507,28 @@ class PluginUpdater(object):
                             c.remove_option(section, key)
                 if dirty:
                     try:
-                        makedirs(dirname(self.parse_env(ini['file'])))
+                        os.makedirs(dirname(self._parse_env(ini['file'])))
                     except WindowsError:
                         pass
 
-                    with open(self.parse_env(ini['file']), mode='w') as f:
+                    with open(self._parse_env(ini['file']), mode='w') as f:
                         c.write(f)
                 if mode == 'backup':
                     self._env['$maxroot'] = root
+            elif 'out' in node and not fake:
+                for o in node['out']:
+                    with file(join(backup_dst, self._parse_env(o[0]).lower()), 'w') as f:
+                        f.write(self._parse_env(o[1]))
 
             if mode == 'backup':
-                import socket
                 #import uuid
                 self._logger.debug('Building sha hash')
-                id = GetHashofDirs(join(backup_dst, build_number)) #uuid.uuid4().get_hex()
+                id = GetHashofDirs(join(backup_dst, build_number))
                 with file(join(backup_dst, build_number, 'backup.id'), 'w') as f:
                     f.write(id)
             r = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
-            with file(join(backup_dst, self.parse_env(self._backup_info)), 'w') as f:
+            with file(join(backup_dst, self._parse_env(self._backup_info)), 'w') as f:
                 f.write(r)
-
-            if 'out' in node and not fake:
-                for o in node['out']:
-                    with file(join(backup_dst, self.parse_env(o[0]).lower()), 'w') as f:
-                        f.write(self.parse_env(o[1]))
 
             # Rename core file to prevent running while updating - Restore
             if mode == 'install':
@@ -423,12 +541,3 @@ class PluginUpdater(object):
                     self._set_env(node_env)
 
             self._logger.debug('\nCopied {0} files(s).'.format(file_count))
-
-
-if __name__ == '__main__':
-    print("Plugin Installer/Backup v1.5")
-    plug = PluginUpdater()
-    plug._logger.addHandler(logging.StreamHandler())
-    plug._logger.setLevel(logging.DEBUG)
-    plug.load_updater_info()
-    plug.process()

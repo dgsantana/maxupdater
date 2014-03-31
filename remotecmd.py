@@ -20,17 +20,32 @@ class RemoteCmd(object):
         self.servers_list = []
         context = zmq.Context()
         self._api = context.socket(zmq.REQ)
+        self._info = context.socket(zmq.SUB)
         #socket.connect('tcp://127.0.0.1:5570')
         #self.client_stream = zmqstream.ZMQStream(sock, ioloop.IOLoop.instance())
         #self.client_stream.on_recv(self.process_response)
         self._stop = False
+        self._info_thread = threading.Thread(target=self.info_loop, args=[self])
+        self._info_thread.daemon = True
         self.daemon = threading.Thread(target=self.threaded_loop, args=[self])
         self.daemon.daemon = True
         self.daemon.start()
+        self._info_thread.start()
+
+    @staticmethod
+    def info_loop(self):
+        print('Info thread started...\n')
+        while 1:
+            if self._stop:
+                return
+            self._info.poll()
+            message = self._info.recv()
+            if message != '':
+                print message
 
     @staticmethod
     def threaded_loop(self):
-        print('Backoffice server started...')
+        print('Backoffice server started...\n')
         while 1:
             if self._stop:
                 return
@@ -49,7 +64,8 @@ class RemoteCmd(object):
         #self.client_stream.close()
         #self.client_stream = None
         self._stop = True
-        self.daemon.stop()
+        self.daemon.join()
+        self._info_thread.join()
         sys.exit()
 
     def parse_cmd(self, cmdline):
@@ -60,6 +76,7 @@ class RemoteCmd(object):
             ipadd = socket.gethostbyname(opt)
             self.servers_list.append('{0} - {1}'.format(opt, ipadd))
             self._api.connect('tcp://%s:5570' % ipadd)
+            self._info.connect('tcp://%s:5571' % ipadd)
         elif cmd == 'update':
             if opt == '' or opt == 'all':
                 print 'Updating %i clients' % len(self.servers_list)

@@ -94,6 +94,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
         h = socket.gethostname().lower()
         self._socket.setsockopt(zmq.IDENTITY, h)
         self._socket.bind('tcp://*:5570')
+        self._socket_pub = self._context.socket(zmq.PUB)
+        self._socket_pub.bind('tcp://*:5571')
         self._server_stream = zmqstream.ZMQStream(self._socket)
         self._server_stream.on_recv(self._process_server)
 
@@ -121,6 +123,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 self._logger.info('Stopping service.')
                 ioloop.IOLoop.instance().stop()
                 server.join()
+                self._socket_pub.close()
+                self._socket_pub = None
                 break
             try:
                 self.update_max()
@@ -268,10 +272,11 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
 
         self._updater.load_updater_info()
         if not self._updater.check_for_valid_updates(self._max_versions):
+            self._socket_pub.send_string('Updates not required.')
             self._logger.info('Updates not required.')
             return
 
-        self.updateCmdSignal.fire('update_start')
+        self._socket_pub.send_string('update_start')
         service_running = []
         for k in self._services.iterkeys():
             try:
@@ -296,7 +301,7 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
                 self._logger.error('Error starting %s.' % k, exc_info=True)
 
         self._logger.info('Update done.')
-        self.updateCmdSignal.fire('update_end')
+        self._socket_pub.send_string('update_end')
 
 
 def ctrl_handler(ctrlType):
