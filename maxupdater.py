@@ -30,13 +30,16 @@ class StandaloneUpdater(object):
             try:
                 time.sleep(15)
             except KeyboardInterrupt:
+                self._logger.debug('Ctrl+C detected.')
                 break
         self._cmd_thread.stop()
         self._update_thread.stop()
         if self._cmd_thread.is_alive:
-            self._cmd_thread.join(1)
+            self._cmd_thread.join()
+            self._logger.debug('Command thread stopped.')
         if self._update_thread.is_alive:
-            self._update_thread.join(1)
+            self._update_thread.join()
+            self._logger.debug('Updater thread stopped.')
         self._logger.debug('Clean exit from Ctrl+C')
         sys.exit()
 
