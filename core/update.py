@@ -3,11 +3,11 @@ import os
 from os.path import join, dirname
 import _winreg
 import socket
+import time
+import sys
 
 from psutil import NoSuchProcess
-import time
 import psutil
-import sys
 import win32serviceutil
 import yaml
 
@@ -37,7 +37,8 @@ class UpdateThread(threading.Thread):
         threading.Thread.__init__(self)
         self._monitor_processes = True
         self._options_files = {}
-        self._service_path = os.path.dirname(__file__) if not hasattr(sys, 'frozen') else os.path.dirname(unicode(sys.executable, sys.getfilesystemencoding()))
+        self._service_path = os.path.dirname(__file__) if not hasattr(sys, 'frozen') else os.path.dirname(
+            unicode(sys.executable, sys.getfilesystemencoding()))
         self._default_path = os.path.join(self._service_path, 'updater.ini')
         self._options_files[self._default_path] = 0
         self._first = True
@@ -101,7 +102,8 @@ class UpdateThread(threading.Thread):
             if config.has_option('Service', 'timer'):
                 self._options['timeout'] = config.getint('Service', 'timer')
             if config.has_option('Service', 'processes'):
-                self._options['processes'] = [i.rstrip().lstrip() for i in config.get('Service', 'processes').split(',')]
+                self._options['processes'] = [i.rstrip().lstrip() for i in
+                                              config.get('Service', 'processes').split(',')]
             if config.has_option('Service', 'versions'):
                 self._options['versions'] = [i.strip() for i in config.get('Service', 'versions').split(',')]
             if config.has_option('Service', 'installs'):
@@ -301,6 +303,7 @@ class UpdateThread(threading.Thread):
     def copy_tree(self, source, dest, exclude=[]):
         import os.path
         import shutil
+
         mode = self._options['mode']
         if mode == 'install':
             src = dest
@@ -319,8 +322,8 @@ class UpdateThread(threading.Thread):
 
     def zip_tree(self, source, dest, name, exclude=[]):
         import os.path
-        import shutil
         import zipfile
+
         mode = self._options['mode']
         if mode == 'install':
             src = dest
@@ -341,10 +344,13 @@ class UpdateThread(threading.Thread):
     def _requires_update(self, backup_dst, build_number):
         #import socket
         try:
-            self._logger.debug('Checking id %s %s' % (join(backup_dst, build_number, 'backup.id'), join(backup_dst, self._parse_env(self._options['backup_info']))))
+            self._logger.debug('Checking id %s %s' % (join(backup_dst, build_number, 'backup.id'),
+                                                      join(backup_dst, self._parse_env(self._options['backup_info']))))
             c = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
             m = open(join(backup_dst, self._parse_env(self._options['backup_info']))).read().rstrip('\n')
             return c != m
+        except IOError:
+            return True
         except:
             self._logger.error('Error checking for updates.', exc_info=True)
         return True
@@ -477,7 +483,8 @@ class UpdateThread(threading.Thread):
                         temp_destination = backup_dst
 
                         if group_destination in file_group:
-                            temp_destination = join(self._options['repo'], self._parse_env(file_group[group_destination]))
+                            temp_destination = join(self._options['repo'],
+                                                    self._parse_env(file_group[group_destination]))
 
                         if group_files in file_group and isinstance(file_group[group_files], list):
                             self._logger.info('Processing file group %s' % k)

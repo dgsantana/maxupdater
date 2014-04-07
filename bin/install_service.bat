@@ -13,6 +13,7 @@ taskkill /s \\%1 /f /im updater_service.exe /t >NUL
 echo Installing updater service on %1
 echo Copying services files to %1
 xcopy %~dp0*.* \\%1\c$\Tools\Updater\ /s /y /q
+del \\%1\c$\Tools\Updater\debug.log /F /Q
 del \\%1\c$\Tools\Updater\install_service.bat /F /Q
 del \\%1\c$\Tools\Updater\update_tools.bat /F /Q
 sc \\%1 delete 3dsmaxupdatesvc 
