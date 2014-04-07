@@ -15,6 +15,7 @@ echo Copying services files to %1
 xcopy %~dp0*.* \\%1\c$\Tools\Updater\ /s /y /q
 del \\%1\c$\Tools\Updater\install_service.bat /F /Q
 del \\%1\c$\Tools\Updater\update_tools.bat /F /Q
+sc \\%1 delete 3dsmaxupdatesvc 
 sc \\%1 create 3dsmaxupdatesvc binPath=c:\Tools\Updater\updater_service.exe start=auto obj="4ARQ\slaveuser" password="slaveuser"
 if %errorlevel% NEQ 0 echo Error installing service on %1 with error %errorlevel%
 echo Starting updater service on %1
@@ -28,9 +29,12 @@ taskkill /s \\%1 /f /im updater_service.exe /t >NUL
 echo Copying services files to %1
 del \\%1\c$\Tools\Updater\*.* /f /q /s >nul
 xcopy %~dp0*.* \\%1\c$\Tools\Updater\ /s /y /q 
+del \\%1\c$\Tools\Updater\debug.log /F /Q
 del \\%1\c$\Tools\Updater\install_service.bat /F /Q
 del \\%1\c$\Tools\Updater\update_tools.bat /F /Q
 echo Starting updater service on %1
+sc \\%1 delete 3dsmaxupdatesvc 
+sc \\%1 create 3dsmaxupdatesvc binPath=c:\Tools\Updater\updater_service.exe start=auto obj="4ARQ\slaveuser" password="slaveuser"
 sc \\%1 start 3dsmaxupdatesvc >NUL
 if %errorlevel% NEQ 0 echo Error starting service on %1 with error %errorlevel%
 IF %errorlevel% == 1063 GOTO RETRY
@@ -39,7 +43,7 @@ GOTO END
 echo Workaround to bad services
 taskkill /s \\%1 /f /im maxupdaterservice.exe /t >NUL;
 taskkill /s \\%1 /f /im updater_service.exe /t >NUL
-sc \\%1 delete
+sc \\%1 delete 3dsmaxupdatesvc 
 sc \\%1 create 3dsmaxupdatesvc binPath=c:\Tools\Updater\updater_service.exe start=auto obj="4ARQ\slaveuser" password="slaveuser"
 sc \\%1 start 3dsmaxupdatesvc >NUL;
 if %errorlevel% NEQ 0 (echo Error starting service on %1 with error %errorlevel%) ELSE (echo Workaround done.)

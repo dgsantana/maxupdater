@@ -2,6 +2,7 @@ from ConfigParser import NoSectionError, NoOptionError, SafeConfigParser, Config
 import os
 from os.path import join, dirname
 import _winreg
+import socket
 
 from psutil import NoSuchProcess
 import time
@@ -41,9 +42,10 @@ class UpdateThread(threading.Thread):
         self._options_files[self._default_path] = 0
         self._first = True
         self._notify = None
-        self._options = {'timeout': 900, 'all_nodes': True, 'mode': 'install'}
+        self._options = {'timeout': 900, 'all_nodes': False, 'mode': 'install'}
         self._plugin_list = {}
-        self._env = {}
+        self._env = {'$host': socket.gethostname().lower()}
+        self._options['backup_info'] = '$host_$node.id'
         self._stop = threading.Event()
         self._logger = logging.getLogger('MaxUpdater')
         self._logger.info('Updater Thread {0} [{1}]'.format(__version__, __date__))
@@ -74,8 +76,8 @@ class UpdateThread(threading.Thread):
         if not os.path.exists(option_file):
             return
         m = os.path.getmtime(option_file)
-        self._logger.debug('File %s modified %s' % (option_file, m))
         if not self._options_files.has_key(option_file) or self._options_files[option_file] != m:
+            self._logger.debug('File %s modified %s' % (option_file, m))
             self._options_files[option_file] = m
         else:
             return
@@ -156,7 +158,7 @@ class UpdateThread(threading.Thread):
 
         self._load_updater_info()
         if not self._check_for_valid_updates(self._options['versions']):
-            self._logger.info('Updates not required.')
+            self._logger.debug('Updates not required.')
             return
 
         service_running = []
@@ -169,7 +171,7 @@ class UpdateThread(threading.Thread):
                 self._logger.debug('Error stopping %s.' % k, exc_info=True)
 
         # don't let any of the processes run
-        killer = threading.Thread(target=self._process_killer())
+        killer = threading.Thread(target=self._process_killer)
         self._monitor_processes = True
         killer.start()
         try:
@@ -270,7 +272,7 @@ class UpdateThread(threading.Thread):
         :param files:
         :type files: list
         """
-        mode = self._options.mode
+        mode = self._options['mode']
         file_count = 0
         if DONT_USE_PROGRESS:
             it = files
@@ -299,7 +301,7 @@ class UpdateThread(threading.Thread):
     def copy_tree(self, source, dest, exclude=[]):
         import os.path
         import shutil
-        mode = self._options.mode
+        mode = self._options['mode']
         if mode == 'install':
             src = dest
             dst = source
@@ -319,7 +321,7 @@ class UpdateThread(threading.Thread):
         import os.path
         import shutil
         import zipfile
-        mode = self._options.mode
+        mode = self._options['mode']
         if mode == 'install':
             src = dest
             dst = source
@@ -339,14 +341,16 @@ class UpdateThread(threading.Thread):
     def _requires_update(self, backup_dst, build_number):
         #import socket
         try:
+            self._logger.debug('Checking id %s %s' % (join(backup_dst, build_number, 'backup.id'), join(backup_dst, self._parse_env(self._options['backup_info']))))
             c = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
-            m = open(join(backup_dst, self._parse_env(self._backup_info))).read().rstrip('\n')
+            m = open(join(backup_dst, self._parse_env(self._options['backup_info']))).read().rstrip('\n')
             return c != m
         except:
-            pass
+            self._logger.error('Error checking for updates.', exc_info=True)
         return True
 
     def _check_for_valid_updates(self, versions=None):
+        self._logger.debug('Checking for valid updates.')
         backup_dst = self._options['repo']
         valid = False
         if versions is None:
@@ -366,10 +370,25 @@ class UpdateThread(threading.Thread):
                         continue
 
                 if 'id_file' in self._plugin_list[o]:
-                    self._backup_info = self._plugin_list[o]['id_file']
+                    self._options['backup_info'] = self._plugin_list[o]['id_file']
                 build_number = self._parse_env(self._plugin_list[o]['destination'])
                 if self._requires_update(backup_dst, build_number):
                     valid = True
+                if 'out' in self._plugin_list[o]:
+                    for o in self._plugin_list[o]['out']:
+                        try:
+                            os.makedirs(dirname(os.path.dirname(o)))
+                        except:
+                            pass
+                        out_file = join(backup_dst, self._parse_env(o[0]).lower())
+                        if os.path.exists(out_file):
+                            out_version = open(out_file).readall().rstrip('\n')
+                        else:
+                            out_version = ''
+                        current_version = self._parse_env(o[1])
+                        if out_version != current_version:
+                            with file(out_file, 'w') as f:
+                                f.write(current_version)
 
         return valid
 
@@ -379,6 +398,7 @@ class UpdateThread(threading.Thread):
             self._process()
 
     def _process_killer(self):
+        self._logger.info('Starting process monitor.')
         while self._monitor_processes:
             try:
                 plist = filter(lambda x: x.name in self._options['processes'],
@@ -388,10 +408,12 @@ class UpdateThread(threading.Thread):
             except:
                 self._logger.debug('Error.', exc_info=True)
             time.sleep(.5)
+        self._logger.info('Stopping process monitor.')
 
     def _process(self, fake=False):
         if self._plugin_list is None:
             return
+        self._logger.info('Starting update process.')
         mode = self._options['mode']
         backup_dst = self._options['repo']
 
@@ -422,7 +444,7 @@ class UpdateThread(threading.Thread):
             self._logger.debug("Root '{0}'".format(base_dir))
             self._logger.debug("Destination '{0}'".format(backup_dst))
             if not self._requires_update(backup_dst, build_number) and mode != 'backup':
-                self._logger.debug('No update required.')
+                self._logger.info('No updates required.')
                 continue
 
             # Rename core file to prevent running while updating
@@ -431,11 +453,11 @@ class UpdateThread(threading.Thread):
             if mode == 'install':
                 if 'tmp' in node and not fake:
                     process_protect = node['tmp']
-                    if len(process_protect) == 2:
-                        try:
-                            os.rename(join(base_dir, process_protect[0]), join(base_dir, process_protect[1]))
-                        except:
-                            self._logger.error('File not found {0}.'.format(process_protect[0]))
+                    # if len(process_protect) == 2:
+                    #     try:
+                    #         os.rename(join(base_dir, process_protect[0]), join(base_dir, process_protect[1]))
+                    #     except:
+                    #         self._logger.error('File not found {0}.'.format(process_protect[0]))
 
             if 'files' in node and not fake:
                 files = node['files']
@@ -517,6 +539,10 @@ class UpdateThread(threading.Thread):
                     self._env['$maxroot'] = root
             elif 'out' in node and not fake:
                 for o in node['out']:
+                    try:
+                        os.makedirs(dirname(os.path.dirname(o)))
+                    except:
+                        pass
                     with file(join(backup_dst, self._parse_env(o[0]).lower()), 'w') as f:
                         f.write(self._parse_env(o[1]))
 
@@ -524,10 +550,14 @@ class UpdateThread(threading.Thread):
                 #import uuid
                 self._logger.debug('Building sha hash')
                 id = GetHashofDirs(join(backup_dst, build_number))
+                try:
+                    os.makedirs(dirname(os.path.dirname(join(backup_dst, build_number, 'backup.id'))))
+                except:
+                    pass
                 with file(join(backup_dst, build_number, 'backup.id'), 'w') as f:
                     f.write(id)
             r = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
-            with file(join(backup_dst, self._parse_env(self._backup_info)), 'w') as f:
+            with file(join(backup_dst, self._parse_env(self._options['backup_info'])), 'w') as f:
                 f.write(r)
 
             # Rename core file to prevent running while updating - Restore
@@ -536,7 +566,8 @@ class UpdateThread(threading.Thread):
                     try:
                         os.rename(join(base_dir, process_protect[1]), join(base_dir, process_protect[0]))
                     except:
-                        self._logger.error('File not found {0}.'.format(process_protect[1]))
+                        pass
+                        #self._logger.error('File not found {0}.'.format(process_protect[1]))
                 if node_env and not fake:
                     self._set_env(node_env)
 

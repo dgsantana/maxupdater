@@ -13,12 +13,17 @@ from core.update import UpdateThread
 __author__ = 'dgsantana'
 
 
-class MaxUpdaterService(win32serviceutil.ServiceFramework):
+class UpdaterService(win32serviceutil.ServiceFramework):
+    _svc_name_ = "3dsmaxupdatesvc"
+    _svc_display_name_ = "3ds Max Updater Manager"
+    _svc_description_ = "Manages automatic updates for 3ds max."
+    _service_path = os.path.dirname(__file__) if not hasattr(sys, 'frozen') else os.path.dirname(
+        unicode(sys.executable, sys.getfilesystemencoding()))
+
     def __init__(self, args=None):
-        if servicemanager.RunningAsService():
-            sys.stdout = sys.stderr = open('nul', 'w')
-            win32serviceutil.ServiceFramework.__init__(self, args)
-            self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+        win32serviceutil.ServiceFramework.__init__(self, args)
+        self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+        sys.stdout = sys.stderr = open('nul', 'w')
         self._logger = logging.getLogger('MaxUpdater')
         if servicemanager.RunningAsService():
             ev_net = NTEventLogHandler(self._svc_name_, None)
@@ -27,7 +32,8 @@ class MaxUpdaterService(win32serviceutil.ServiceFramework):
             self._logger.addHandler(ev_net)
         else:
             logging.basicConfig()
-        rl = RotatingFileHandler(os.path.join(self._service_path, 'debug.log'), delay=True, maxBytes=150000, backupCount=5)
+        rl = RotatingFileHandler(os.path.join(self._service_path, 'debug.log'), delay=True, maxBytes=150000,
+                                 backupCount=5)
         rl.setFormatter(logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s'))
         self._logger.addHandler(rl)
         self._cmd_thread = ExecThread()
@@ -67,9 +73,5 @@ def ctrl_handler(ctrlType):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'standalone':
-        s = MaxUpdaterService()
-        s.standalone_loop()
-    else:
-        win32api.SetConsoleCtrlHandler(ctrl_handler, True)
-        win32serviceutil.HandleCommandLine(MaxUpdaterService)
+    #win32api.SetConsoleCtrlHandler(ctrl_handler, True)
+    win32serviceutil.HandleCommandLine(UpdaterService)

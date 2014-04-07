@@ -1,3 +1,4 @@
+from sys import exc_info
 import threading
 import socket
 import zmq
@@ -8,18 +9,26 @@ __author__ = 'dgsantana'
 __version__ = '1.0a'
 __date__ = '31/03/2014'
 
+
 class ExecThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self._stop = threading.Event()
+        self._logger = logging.getLogger('MaxUpdater')
+        self._logger.info('Cmd Thread {0} [{1}]'.format(__version__, __date__))
         self._context = zmq.Context()
         self._socket = self._context.socket(zmq.REP)
         self._socket.setsockopt(zmq.IDENTITY, socket.gethostname().lower())
-        self._socket.bind('tcp://*:55800')
-        self._logger = logging.getLogger('MaxUpdater')
-        self._logger.info('Cmd Thread {0} [{1}]'.format(__version__, __date__))
+        self._failed = False
+        try:
+            self._socket.bind('tcp://*:56800')
+        except:
+            self._logger.error('Error creating socket.', exc_info=True)
+            self._failed = True
 
     def run(self):
+        if self._failed:
+            return
         poller = zmq.Poller()
         poller.register(self._socket, zmq.POLLIN)
         while not self._stop.isSet():
