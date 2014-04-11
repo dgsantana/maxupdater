@@ -47,6 +47,7 @@ class UpdateThread(threading.Thread):
         self._plugin_list = {}
         self._env = {'$host': socket.gethostname().lower()}
         self._options['backup_info'] = '$host_$node.id'
+        self._options['max_timeout'] = 600
         self._stop = threading.Event()
         self._logger = logging.getLogger('MaxUpdater')
         self._logger.info('Updater Thread {0} [{1}]'.format(__version__, __date__))
@@ -110,6 +111,8 @@ class UpdateThread(threading.Thread):
                 self._options['installs'] = [i.strip() for i in config.get('Service', 'installs').split(',')]
             if config.has_option('Service', 'repo'):
                 self._options['repo'] = config.get('Service', 'repo')
+            if config.has_option('Service', 'maxtimeout'):
+                self._options['maxtimeout'] = config.get('Service', 'maxtimeout')
         except (NoSectionError, NoOptionError):
             pass
 
@@ -151,46 +154,105 @@ class UpdateThread(threading.Thread):
             self._logger.debug('Error.', exc_info=True)
         return abort
 
+    def _is_process_running(self, processes_to_check, services):
+        abort = False
+        if not isinstance(processes_to_check, list):
+            raise Exception('Requires a list, got %s' % type(processes_to_check))
+        if not isinstance(services, dict):
+            raise Exception('Requires a dict, got %s' % type(services))
+        if len(processes_to_check) == 0:
+            return False
+        try:
+            import win32com.client
+            wmi = win32com.client.GetObject('winmgmts:')
+            for p in wmi.InstancesOf('win32_process'):
+                if not p.name in processes_to_check:
+                    continue
+                ps = psutil.Process(p.ProcessId)
+                per = 0
+                try:
+                    per = ps.get_cpu_percent()
+                except:
+                    pass
+                self._logger.debug('%s cpu usage %s' % (p.name, per))
+                parents = wmi.ExecQuery('Select * from win32_process where ProcessId=%s' % p.ParentProcessId)
+                found_service = False
+                for service_name in services.itervalues():
+                    for parent in parents:
+                        if parent.name == service_name and per < 10.0:
+                            self._logger.info('Service %s found.' % parent.name)
+                            found_service = True
+                if not found_service:
+                    self._logger.info('%s has a diferent. [%s.]' % (p.name, parents[0].name))
+                    abort = True
+            # for p in psutil.process_iter():
+            #     try:
+            #         if not p.name() in processes_to_check:
+            #             continue
+            #         per = p.get_cpu_percent()
+            #         self._logger.debug('%s cpu usage %s' % (p.name(), per))
+            #         found_service = False
+            #         for service_name in services.itervalues():
+            #             if p.parent().name() == service_name and per < 10.0:
+            #                 self._logger.info('Service found.')
+            #                 found_service = True
+            #         if not found_service:
+            #             self._logger.info('%s parent %s.' % (p.name(), p.parent().name()))
+            #             abort = True
+            #     except:
+            #         self._logger.log(1, 'Access denied.', exc_info=True)
+        except NoSuchProcess:
+            self._logger.debug('Parent not found.', exc_info=True)
+            abort = True
+        except Exception:
+            self._logger.error('Error.', exc_info=True)
+            abort = True
+        return abort
+
     def _update_max(self):
         self._read_settings()
 
-        if self._can_update():
-            return
-        self._logger.debug('No mission critical 3ds max running.')
+        #if self._can_update():
+        #    return
+        #self._logger.debug('No mission critical 3ds max running.')
 
         self._load_updater_info()
-        if not self._check_for_valid_updates(self._options['versions']):
+        nodes_required = list(set(self._check_for_valid_updates(self._options['versions'])))
+        if len(nodes_required) == 0:
             self._logger.debug('Updates not required.')
             return
 
-        service_running = []
-        for k in self._options['services'].iterkeys():
-            try:
-                self._logger.info('%s service stopping...' % k)
-                win32serviceutil.StopService(k)
-                service_running.append(k)
-            except:
-                self._logger.debug('Error stopping %s.' % k, exc_info=True)
+        # service_running = []
+        # for k in self._options['services'].iterkeys():
+        #     try:
+        #         self._logger.info('%s service stopping...' % k)
+        #         win32serviceutil.StopService(k)
+        #         service_running.append(k)
+        #     except:
+        #         self._logger.debug('Error stopping %s.' % k, exc_info=True)
 
         # don't let any of the processes run
-        killer = threading.Thread(target=self._process_killer)
-        self._monitor_processes = True
-        killer.start()
+        # killer = threading.Thread(target=self._process_killer)
+        # self._monitor_processes = True
+        # killer.start()
+        completed = False
         try:
-            self._logger.info('Updating...')
-            self._process_versions(self._options['versions'])
+            self._logger.info('Updating... %s' % nodes_required)
+            completed = self._process_versions(nodes_required)
         except:
             self._logger.error('Error updating.', exc_info=True)
-            self._options['timeout'] = 60 * 3
 
-        self._monitor_processes = False
-        killer.join()
-        for k in service_running:
-            try:
-                self._logger.info('%s service starting...' % k)
-                win32serviceutil.StartService(k)
-            except:
-                self._logger.error('Error starting %s.' % k, exc_info=True)
+        if not completed and self._options['timeout'] < self._options['max_timeout']:
+            self._options['timeout'] += 60
+
+        # self._monitor_processes = False
+        # killer.join()
+        # for k in service_running:
+        #     try:
+        #         self._logger.info('%s service starting...' % k)
+        #         win32serviceutil.StartService(k)
+        #     except:
+        #         self._logger.error('Error starting %s.' % k, exc_info=True)
         self._logger.info('Update done.')
 
     def _set_env(self, env_key):
@@ -223,7 +285,7 @@ class UpdateThread(threading.Thread):
                 if self._env[k] is None:
                     result = False
                 else:
-                    self._logger.debug("Adding env['%s'] = '%s'" % (k, self._env[k]))
+                    pass  # self._logger.debug("Adding env['%s'] = '%s'" % (k, self._env[k]))
         return result
 
     @staticmethod
@@ -344,12 +406,11 @@ class UpdateThread(threading.Thread):
     def _requires_update(self, backup_dst, build_number):
         #import socket
         try:
-            self._logger.debug('Checking id %s %s' % (join(backup_dst, build_number, 'backup.id'),
-                                                      join(backup_dst, self._parse_env(self._options['backup_info']))))
             c = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
             m = open(join(backup_dst, self._parse_env(self._options['backup_info']))).read().rstrip('\n')
             return c != m
         except IOError:
+            self._logger.info('No update check file.')
             return True
         except:
             self._logger.error('Error checking for updates.', exc_info=True)
@@ -358,7 +419,7 @@ class UpdateThread(threading.Thread):
     def _check_for_valid_updates(self, versions=None):
         self._logger.debug('Checking for valid updates.')
         backup_dst = self._options['repo']
-        valid = False
+        valid = []
         if versions is None:
             versions = [self._env['$version']]
 
@@ -379,16 +440,16 @@ class UpdateThread(threading.Thread):
                     self._options['backup_info'] = self._plugin_list[o]['id_file']
                 build_number = self._parse_env(self._plugin_list[o]['destination'])
                 if self._requires_update(backup_dst, build_number):
-                    valid = True
+                    valid.append(o)
                 if 'out' in self._plugin_list[o]:
                     for o in self._plugin_list[o]['out']:
-                        try:
-                            os.makedirs(dirname(os.path.dirname(o)))
-                        except:
-                            pass
                         out_file = join(backup_dst, self._parse_env(o[0]).lower())
+                        try:
+                            os.makedirs(os.path.dirname(out_file))
+                        except:
+                            pass  # self._logger.error('Error in make dir.', exc_info=True)
                         if os.path.exists(out_file):
-                            out_version = open(out_file).readall().rstrip('\n')
+                            out_version = open(out_file).read(-1).rstrip('\n')
                         else:
                             out_version = ''
                         current_version = self._parse_env(o[1])
@@ -398,38 +459,60 @@ class UpdateThread(threading.Thread):
 
         return valid
 
-    def _process_versions(self, versions):
-        for v in versions:
+    def _process_versions(self, nodes_required):
+        completed = False
+        for v in self._options['versions']:
             self._env['$version'] = v
-            self._process()
+            completed &= self._process(v, nodes_required)
+        return completed
 
-    def _process_killer(self):
+    def _process_killer(self, processes_to_kill=None):
         self._logger.info('Starting process monitor.')
+        if processes_to_kill is None:
+            processes_to_kill = self._options['processes']
+        import win32com.client
         while self._monitor_processes:
             try:
-                plist = filter(lambda x: x.name in self._options['processes'],
-                               [psutil.Process(i) for i in psutil.get_pid_list()])
-                for p in plist:
-                    p.kill()
+                wmi = win32com.client.GetObject('winmgmts:')
+                for p in wmi.InstancesOf('win32_process'):
+                    if p.name in processes_to_kill:
+                        p.Terminate()
+                # for p in psutil.process_iter():
+                #     try:
+                #         if p.name() in processes_to_kill:
+                #             p.kill()
+                #     except:
+                #         self._logger.log(1, 'Access denied to exec.', exc_info=True)
+                #         pass
             except:
-                self._logger.debug('Error.', exc_info=True)
+                self._logger.error('Error in process killer.', exc_info=True)
             time.sleep(.5)
         self._logger.info('Stopping process monitor.')
 
-    def _process(self, fake=False):
+    def _process(self, version=None, nodes_required=[]):
         if self._plugin_list is None:
             return
-        self._logger.info('Starting update process.')
+        fake = False
+        completed = False
+        self._logger.debug('Starting update process.')
         mode = self._options['mode']
         backup_dst = self._options['repo']
 
         for o in self._plugin_list:
-            if not o in self._options['installs'] and not self._options['all_nodes']:
+            if not o in nodes_required:
                 continue
+            #if not o in self._options['installs'] and not self._options['all_nodes']:
+            #    continue
 
             self._env['$node'] = o
-
             node = self._plugin_list[o]
+
+            if 'valid_versions' in node:
+                if not int(version) in [int(i) for i in node['valid_versions']]:
+                    self._logger.info(
+                        'Version %s not defined for this update node %s(%s).' % (version, o, node['valid_versions']))
+                    continue
+
             node_env = None
             if 'env' in node:
                 node_env = node['env']
@@ -447,23 +530,38 @@ class UpdateThread(threading.Thread):
             build_number = self._parse_env(node['destination'])
             file_count = 0
             self._logger.info("Processing '{0}' in {1} mode.".format(self._parse_env(node['name']), mode))
-            self._logger.debug("Root '{0}'".format(base_dir))
-            self._logger.debug("Destination '{0}'".format(backup_dst))
+
             if not self._requires_update(backup_dst, build_number) and mode != 'backup':
                 self._logger.info('No updates required.')
+                completed = True
                 continue
 
-            # Rename core file to prevent running while updating
-            # Renaming 3dsmax.exe can break shortcuts.
-            process_protect = []
-            if mode == 'install':
-                if 'tmp' in node and not fake:
-                    process_protect = node['tmp']
-                    # if len(process_protect) == 2:
-                    #     try:
-                    #         os.rename(join(base_dir, process_protect[0]), join(base_dir, process_protect[1]))
-                    #     except:
-                    #         self._logger.error('File not found {0}.'.format(process_protect[0]))
+            services = node['services'] if 'services' in node else {}
+            processes = node['kill_processes'] if 'kill_processes' in node else []
+            self._logger.info("Checking running processes %s." % processes)
+            if self._is_process_running(processes, services):
+                self._logger.info('Process running cannot update.')
+                completed = False
+                continue
+
+            self._logger.debug("Root '{0}'".format(base_dir))
+            self._logger.debug("Destination '{0}'".format(backup_dst))
+
+            service_running = []
+            for k in services.iterkeys():
+                try:
+                    self._logger.info('%s service stopping...' % k)
+                    win32serviceutil.StopService(k)
+                    service_running.append(k)
+                    time.sleep(2)
+                except:
+                    self._logger.debug('Error stopping %s.' % k, exc_info=True)
+
+            killer = None
+            if len(processes) > 0:
+                killer = threading.Thread(target=self._process_killer, kwargs={'processes_to_kill': processes})
+                self._monitor_processes = True
+                killer.start()
 
             if 'files' in node and not fake:
                 files = node['files']
@@ -563,19 +661,22 @@ class UpdateThread(threading.Thread):
                     pass
                 with file(join(backup_dst, build_number, 'backup.id'), 'w') as f:
                     f.write(id)
+
             r = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')
             with file(join(backup_dst, self._parse_env(self._options['backup_info'])), 'w') as f:
                 f.write(r)
 
-            # Rename core file to prevent running while updating - Restore
-            if mode == 'install':
-                if len(process_protect) == 2:
-                    try:
-                        os.rename(join(base_dir, process_protect[1]), join(base_dir, process_protect[0]))
-                    except:
-                        pass
-                        #self._logger.error('File not found {0}.'.format(process_protect[1]))
-                if node_env and not fake:
-                    self._set_env(node_env)
-
             self._logger.debug('\nCopied {0} files(s).'.format(file_count))
+
+            if len(processes) > 0:
+                self._monitor_processes = False
+                killer.join()
+
+            for k in service_running:
+                try:
+                    self._logger.info('%s service starting...' % k)
+                    win32serviceutil.StartService(k)
+                except:
+                    self._logger.error('Error starting %s.' % k, exc_info=True)
+            completed = True
+        return completed
