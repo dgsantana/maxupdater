@@ -1,10 +1,10 @@
 #!/usr/bin/python2.7
+from argparse import ArgumentParser
 from collections import OrderedDict
 import os
 import sys
 from os import makedirs
 from os.path import join, dirname
-from optparse import OptionParser
 import _winreg
 import logging
 from ConfigParser import NoOptionError, NoSectionError, ConfigParser
@@ -33,30 +33,28 @@ def foo_callback(option, opt, value, parser):
 class PluginUpdater(object):
     """description of class"""
 
-    def __init__(self, args=None):
-        parser = OptionParser()
-        parser.add_option('-m', '--mode', dest="mode", default="backup", choices=['install', 'backup'],
-                          help='interaction mode: install, backup')
-        parser.add_option('-i', '--install', dest="mode", action="store_const", const="install",
-                          help='install mode')
-        parser.add_option('-v', '--maxversion', dest="max_version", default="0",
-                          help='3ds max version number')
-        parser.add_option('-s', '--sourcemaxversion', dest="source_version", default=None,
-                          help='source 3ds max version number')
-        parser.add_option('-d', '--debug', dest="verbose", action="store_true",
-                          help='verbose mode')
-        parser.add_option('-q', '--quiet', dest="verbose", action="store_false",
-                          help='quiet mode')
-        parser.add_option('-p', '--path', dest="path", default="\\\\4arq-server00\\NetInstall\\max_plugs\\",
-                          help='backup path')
-        parser.add_option('-n', '--node', dest="node", action='callback', callback=foo_callback,
-                          default=['maxplugins', 'dmaxplugins'],
-                          help='node do backup/install')
-        parser.add_option('-a', '--all', dest="allnodes", default=False,
-                          help='copy all nodes')
-        if args is None:
-            args = sys.argv[1:]
-        (options, args) = parser.parse_args(args)
+    def __init__(self):
+        parser = ArgumentParser()
+        parser.add_argument('-m', '--mode', dest="mode", default="backup", choices=['install', 'backup'],
+                            help='interaction mode: install, backup')
+        parser.add_argument('-i', '--install', dest="mode", action="store_const", const="install",
+                            help='install mode')
+        parser.add_argument('-v', '--maxversion', dest="max_version", default="0",
+                            help='3ds max version number')
+        parser.add_argument('-s', '--sourcemaxversion', dest="source_version", default=None,
+                            help='source 3ds max version number')
+        parser.add_argument('-d', '--debug', dest="verbose", action="store_true",
+                            help='verbose mode')
+        parser.add_argument('-q', '--quiet', dest="verbose", action="store_false",
+                            help='quiet mode')
+        parser.add_argument('-p', '--path', dest="path", default="\\\\4arq-server00\\NetInstall\\max_plugs\\",
+                            help='backup path')
+        parser.add_argument('-n', '--node', dest="node", default='maxplugins',
+                            help='node do backup/install')
+        parser.add_argument('-a', '--all', dest="allnodes", default=False,
+                            help='copy all nodes')
+
+        options = parser.parse_args()
         self._options = options
         self._yaml = {}
         import socket
@@ -188,6 +186,7 @@ class PluginUpdater(object):
     def copy_tree(self, source, dest, exclude=[]):
         import os.path
         import shutil
+
         mode = self._options.mode
         if mode == 'install':
             src = dest
@@ -208,6 +207,7 @@ class PluginUpdater(object):
         import os.path
         import shutil
         import zipfile
+
         mode = self._options.mode
         if mode == 'install':
             src = dest
@@ -293,6 +293,13 @@ class PluginUpdater(object):
             abort_failed = False
             if 'abort_failed' in node:
                 abort_failed = node['abort_failed']
+
+            if 'valid_versions' in node:
+                if not int(self._env['$version']) in [int(i) for i in node['valid_versions']]:
+                    self._logger.info(
+                        'Version %s not defined for this update node %s(%s).' % (
+                            self._env['$version'], o, node['valid_versions']))
+                    continue
 
             base_dir = self.parse_env(node['basedir'])
             build_number = self.parse_env(node['destination'])
@@ -400,7 +407,7 @@ class PluginUpdater(object):
                 import socket
                 #import uuid
                 self._logger.debug('Building sha hash')
-                id = GetHashofDirs(join(backup_dst, build_number)) #uuid.uuid4().get_hex()
+                id = GetHashofDirs(join(backup_dst, build_number))  #uuid.uuid4().get_hex()
                 with file(join(backup_dst, build_number, 'backup.id'), 'w') as f:
                     f.write(id)
             r = open(join(backup_dst, build_number, 'backup.id')).read().rstrip('\n')

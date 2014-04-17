@@ -436,6 +436,10 @@ class UpdateThread(threading.Thread):
                     if not self._update_env(self._plugin_list[o]['env']):
                         continue
 
+                if 'valid_versions' in self._plugin_list[o]:
+                    if not int(v) in [int(i) for i in self._plugin_list[o]['valid_versions']]:
+                        continue
+
                 if 'id_file' in self._plugin_list[o]:
                     self._options['backup_info'] = self._plugin_list[o]['id_file']
                 build_number = self._parse_env(self._plugin_list[o]['destination'])
