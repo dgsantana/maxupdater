@@ -480,7 +480,7 @@ class UpdateThread(threading.Thread):
                 wmi = win32com.client.GetObject('winmgmts:')
                 for p in wmi.InstancesOf('win32_process'):
                     if p.name in processes_to_kill:
-                        p.Terminate()
+                        p.Terminate(Result=1)
                 # for p in psutil.process_iter():
                 #     try:
                 #         if p.name() in processes_to_kill:
