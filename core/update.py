@@ -8,6 +8,7 @@ import sys
 
 from psutil import NoSuchProcess
 import psutil
+import servicemanager
 import win32serviceutil
 import yaml
 
@@ -26,7 +27,7 @@ try:
 except ImportError:
     pass
 
-if "progress" in dir():
+if "progress" in dir() and not servicemanager.RunningAsService():
     DONT_USE_PROGRESS = False
 else:
     DONT_USE_PROGRESS = True
@@ -43,11 +44,11 @@ class UpdateThread(threading.Thread):
         self._options_files[self._default_path] = 0
         self._first = True
         self._notify = None
-        self._options = {'timeout': 900, 'all_nodes': False, 'mode': 'install'}
+        self._options = {'timeout': 90, 'all_nodes': False, 'mode': 'install'}
         self._plugin_list = {}
         self._env = {'$host': socket.gethostname().lower()}
         self._options['backup_info'] = '$host_$node.id'
-        self._options['max_timeout'] = 600
+        self._options['max_timeout'] = 240
         self._stop = threading.Event()
         self._logger = logging.getLogger('MaxUpdater')
         self._logger.info('Updater Thread {0} [{1}]'.format(__version__, __date__))
@@ -78,7 +79,7 @@ class UpdateThread(threading.Thread):
         if not os.path.exists(option_file):
             return
         m = os.path.getmtime(option_file)
-        if not self._options_files.has_key(option_file) or self._options_files[option_file] != m:
+        if option_file not in self._options_files or self._options_files[option_file] != m:
             self._logger.debug('File %s modified %s' % (option_file, m))
             self._options_files[option_file] = m
         else:
@@ -90,9 +91,6 @@ class UpdateThread(threading.Thread):
         config = SafeConfigParser()
         config.read(option_file)
         try:
-            if config.has_option('Global', 'options') and not global_options:
-                p = config.get('Global', 'options')
-                self._parse_options(p, global_options=True)
             if config.has_option('Global', 'mode') and not global_options:
                 self._options['mode'] = config.get('Global', 'mode')
             if config.has_option('Service', 'logging'):
@@ -112,7 +110,12 @@ class UpdateThread(threading.Thread):
             if config.has_option('Service', 'repo'):
                 self._options['repo'] = config.get('Service', 'repo')
             if config.has_option('Service', 'maxtimeout'):
-                self._options['maxtimeout'] = config.get('Service', 'maxtimeout')
+                self._options['max_timeout'] = config.get('Service', 'maxtimeout')
+            
+            # Parse the global options overriding everything...
+            if config.has_option('Global', 'options') and not global_options:
+                p = config.get('Global', 'options')
+                self._parse_options(p, global_options=True)
         except (NoSectionError, NoOptionError):
             pass
 
@@ -475,11 +478,14 @@ class UpdateThread(threading.Thread):
         if processes_to_kill is None:
             processes_to_kill = self._options['processes']
         import win32com.client
+        import pythoncom
+        pythoncom.CoInitialize()
         while self._monitor_processes:
             try:
                 wmi = win32com.client.GetObject('winmgmts:')
                 for p in wmi.InstancesOf('win32_process'):
                     if p.name in processes_to_kill:
+                        #os.system('taskkill /im "%s"' % p.name)
                         p.Terminate(Result=1)
                 # for p in psutil.process_iter():
                 #     try:
@@ -491,6 +497,7 @@ class UpdateThread(threading.Thread):
             except:
                 self._logger.error('Error in process killer.', exc_info=True)
             time.sleep(.5)
+        pythoncom.CoUninitialize()
         self._logger.info('Stopping process monitor.')
 
     def _process(self, version=None, nodes_required=[]):
@@ -601,7 +608,8 @@ class UpdateThread(threading.Thread):
                                 d1 = os.path.dirname(os.path.join(temp_destination, d))
                                 self._logger.info('Copying directory %s to %s' % (b1, d1))
                                 self.copy_tree(b1, d1)
-            elif 'ini' in node and not fake:
+            elif 'ini' in node:
+                self._logger.info('Processing ini...')
                 ini = node['ini']
                 section = self._parse_env(ini['section'])
                 c = ConfigParser()
